@@ -10,13 +10,13 @@ $ONTEXT
     Torbjörn Jansson, SLU
 $OFFTEXT
 
-SET ig Land uses and groups /forestry, pasture, arable, arable1, arable2/
-    i(ig) Land uses /forestry, pasture, arable1, arable2/
+SET ig Land uses and groups /forestry, pasture, arable, arable1, arable2, arable3/
+    i(ig) Land uses /forestry, pasture, arable1, arable2, arable3/
     g(ig) Land classes /forestry, pasture, arable/
     g_i(g,i) Map of groups to land classes /
         forestry.forestry
         pasture.pasture
-        arable.(arable1,arable2) /
+        arable.(arable1,arable2,arable3) /
     go(g) Only classes with several individual activities
     u(i,i) Upper triangular matrix of i;
 ALIAS(i,j,k); ALIAS(g,h); ALIAS(ig,jh); ALIAS(go,ho);
@@ -32,6 +32,7 @@ PARAMETERS
     pasture     200
     arable1     400
     arable2     200
+    arable3     150
     /
 
     y(ig) Land allocation /
@@ -39,6 +40,7 @@ PARAMETERS
     pasture     100
     arable1      60
     arable2      40
+    arable3      10
     /
 
     elasup(ig) Elasticity of substitution /
@@ -53,7 +55,11 @@ PARAMETERS
     pasture.arable      0.2
     arable.pasture      0.2
     arable1.arable2     1
+    arable1.arable3     1
     arable2.arable1     1
+    arable2.arable3     1
+    arable3.arable1     1
+    arable3.arable2     1
     /
 
     s(g,i) Share of activity i in group g
