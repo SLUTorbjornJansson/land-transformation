@@ -17,9 +17,11 @@ SET ig Land uses and groups /forestry, pasture, arable, arable1, arable2/
         forestry.forestry
         pasture.pasture
         arable.(arable1,arable2) /
+    go(g) Only classes with several individual activities
     u(i,i) Upper triangular matrix of i;
-ALIAS(i,j,k); ALIAS(g,h);
+ALIAS(i,j,k); ALIAS(g,h); ALIAS(ig,jh); ALIAS(go,ho);
 u(i,j) = YES $ (ORD(i) LE ORD(j));
+go(g) = YES $ [SUM(g_i(g,i), 1) gt 1];
 
 
 PARAMETERS
@@ -45,11 +47,13 @@ PARAMETERS
     arable      0.3
     /
 
-    elatrans(ig,ig) Elasticity of transformation (symmetric) /
-    forestry.pasture    2
-    forestry.arable     0.5
+    elatrans(ig,ig) Prior elasticity of transformation (symmetric) /
+*    forestry.pasture    0.1
+*    forestry.arable     0.5
     pasture.arable      0.2
+    arable.pasture      0.2
     arable1.arable2     1
+    arable2.arable1     1
     /
 
     s(g,i) Share of activity i in group g
@@ -144,35 +148,34 @@ edydr(i,j) ..
 eES(i,j) ..
     vES(i,j) =E= vdydr(i,j)*r(j)/y(i);
 
-eESg(g,h) ..
-    vESg(g,h) =E= SUM((i,j)$[g_i(g,i) AND g_i(h,j)], s(g,i)*vES(i,j));
+eESg(g,h) $ [go(g) OR ho(h)]..
+    vES(g,h) =E= SUM((i,j)$[g_i(g,i) AND g_i(h,j)], s(g,i)*vES(i,j));
 
-eET(i,j) ..
-    vET(i,j) =E= vES(i,i) - vES(j,i);
+eET(i,j) $ [NOT SAMEAS(i,j)]..
+    vET(i,j) =E= vES(j,j) - vES(i,j);
 
-eETg(g,h) ..
-    vETg(g,h) =E= vESg(g,g) - vESg(h,g);
+eETg(g,h) $ [(go(g) OR ho(h)) AND (NOT SAMEAS(g,h))]..
+    vET(g,h) =E= vES(h,h) - vES(g,h);
 
 eFoc(i) ..
     r(i) - vc(i) - 2*SUM(j, vq(i,j)*y(j)) - lambda =E= 0;
 
 eCrit ..
-    vCrit =E= SUM(i $ elasup(i), SQR(elasup(i)-vES(i,i)))
+    vCrit =E= SUM(ig $ elasup(ig), SQR(elasup(ig)-vES(ig,ig)))
 
-            + SUM(g $ elasup(g), SQR(elasup(g)-vESg(g,g)))
+*            + SUM(g $ elasup(g), SQR(elasup(g)-vES(g,g)))
 
-*           + SUM((i,j) $ (elatrans(i,j) + elatrans(j,i)),
-*                       SQR((elatrans(i,j) + elatrans(j,i))/2
-*                           -vET(i,j)))
+           + SUM((i,j) $ elatrans(i,j),
+                       SQR[elatrans(i,j) - vET(i,j)])
 
 *           + SUM((g,h) $ (elatrans(g,h) + elatrans(h,g)),
 *                       SQR((elatrans(g,h) + elatrans(h,g))/2
 *                           -vETg(g,h)))
         ;
 
-MODEL mEst Estimation model /eCrit, eFoc, eH, eHi, eUU, eB, edydr, eES, eESg, eET, eETg/;
-*MODEL mSim Simulation model /ep, eland, eyg, erg/;
-MODEL mSim Simulation model /ep, eland, eyg/;
+MODEL mEst Estimation model /eCrit, eFoc, eH, eHi, eUU, eB, edydr, eES, eESg, eET, eETg, eyg, erg/;
+MODEL mSim Simulation model /ep, eland, eyg, erg/;
+*MODEL mSim Simulation model /ep, eland, eyg/;
 
 
 *   --- Initialize levels ---
@@ -180,10 +183,15 @@ vH.L(i,i) = 100;
 vHi.L(i,i) = 1/vH.L(i,i);
 vU.L(i,i) = SQRT(vH.L(i,i));
 vU.FX(i,j) $ [NOT u(i,j)] = 0;
+vy.L(i) = y(i);
 
+y(g)             = SUM(g_i(g,i), y(i));
+vy.L(g)          = y(g);
+vr.L(g) $ vy.L(g)= SUM(g_i(g,i), r(i)*vy.L(i)) / vy.L(g);
+r(g) = vr.L(g);
 
 SOLVE mEst USING NLP MINIMIZING vCrit;
-SOLVE mEst USING NLP MINIMIZING vCrit;
+
 
 q(i,j) = vq.L(i,j);
 c(i) = vc.L(i);
@@ -195,7 +203,7 @@ DISPLAY pfoc;
 
 *   --- Check for calibration ---
 SOLVE mSim USING NLP MAXIMIZING vp;
-$stop
+*$stop
 *   --- Run an experiment ---
 SET restype /
     elasupori
@@ -207,15 +215,15 @@ SET restype /
 
 PARAMETERS
     res(*,ig,ig) Result set
-    d Relative shock to price/0.01/;
+    d Relative shock to price/0.001/;
 
-res("rentori",k,k) = r(k);
-res("landori",k,k) = y(k);
+res("rentori",ig,ig) = r(ig);
+res("landori",ig,ig) = y(ig);
 res("elasupori",ig,ig) = elasup(ig);
-res("elasupest",i,j) = vES.L(i,j);
-res("elasupest",g,h) = vESg.L(g,h);
-res("elatransest",i,j) = vET.L(i,j);
 res("elatransori",i,j) = elatrans(i,j);
+
+res("elasupest",ig,jh) = vES.L(ig,jh);
+res("elatransest",ig,jh) = vET.L(ig,jh);
 LOOP(k,
     r(k)  = r(k)*(1+d);
     res("rentsim",k,k) = r(k);
@@ -223,15 +231,14 @@ LOOP(k,
     r(k) = r(k)/(1+d);
 
     res("landsim",k,k) = vy.L(k);
-    res("elasupsim",i,k) = (vy.L(i)-y(i))/y(i)/d;
+    res("elasupsim",ig,k) = (vy.L(ig)-y(ig))/y(ig)/d;
 
 
-    res("elatranssim",i,k) = [(vy.L(i)/vy.L(k))
-                             / (y(i)/y(k)) - 1]
+    res("elatranssim",ig,k) = [(vy.L(ig)/vy.L(k))
+                             / (y(ig)/y(k)) - 1]
                             /[-d/(1+d)]
-*                            /[-d]
 );
 
 
 
-EXECUTE_UNLOAD "transformation.gdx" res vq vHi vq vH vU u vET vES vESg s;
+EXECUTE_UNLOAD "transformation.gdx" res i g go vq vHi vq vH vU u vET vES vESg s;
