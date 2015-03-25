@@ -7,6 +7,8 @@ $ONTEXT
 
     Revision 3: attempt to include groups of land uses
 
+    Revision 4: added a parameter that makes costs increase steeply in lower tail
+
     Torbjörn Jansson, SLU
 $OFFTEXT
 
@@ -67,6 +69,7 @@ PARAMETERS
 *   --- Parameters to compute ---
     c(i)    Linear cost component
     q(i,j)  Quadratic cost component
+    t(i)    Tail parameter making costs increase sharply at lower tail
     land    Land endowment
     lambda  Land rent
     ;
@@ -86,6 +89,7 @@ VARIABLES
 *       Dual
     vc(i)   Estimated parameter c
     vq(i,j) Estimated parameter q
+    vctot   Total behavioural cost (pmp terms)
     vH(i,j) Hessian
     vHi(i,j) Hessian inverse
     vU(i,j) Upper triangular Hessian
@@ -103,6 +107,7 @@ POSITIVE VARIABLE vy;
 EQUATIONS
 *       Primal
     ep      Profit of operations
+    ectot   Behavioural total cost (pmp terms)
     eland   Land constraint
     eyg(g)
     erg(g)
@@ -123,7 +128,11 @@ EQUATIONS
 
 *   --- Definition of equations ---
 ep ..
-    vp =E= SUM(i, vy(i)*(r(i) - c(i))) - SUM((i,j), vy(i)*q(i,j)*vy(j));
+    vp =E= SUM(i, vy(i)*r(i)) - vctot;
+*    vp =E= SUM(i, vy(i)*r(i)-c(i)) - 0.5*SUM((i,j), vy(i)*q(i,j)*vy(j));
+
+ectot ..
+    vctot =E= SUM(i, y(i)*c(i)) + 0.5*SUM((i,j), vy(i)*q(i,j)*vy(j));
 
 eland ..
     SUM(i, vy(i)) =L= land;
@@ -136,13 +145,13 @@ erg(g) ..
 
 
 eH(i,j) ..
-    2*vq(i,j) =E= vH(i,j)$u(i,j) + vH(j,i)$[NOT u(i,j)];
+    vq(i,j) =E= vH(i,j)$u(i,j) + vH(j,i)$[NOT u(i,j)];
 
 eHi(i,j) ..
     SUM(k, vHi(i,k)*[vH(k,j)$u(k,j) + vH(j,k)$(NOT u(k,j))]) =E= 1 $ SAMEAS(i,j);
 
 eUU(i,j) $ u(i,j)..
-    vH(i,j) - 0.001 $ SAMEAS(i,j)
+    vH(i,j)*(1-0.01 $ SAMEAS(i,j))
         =E= SUM(k, vU(k,i)*vU(k,j));
 
 eB ..
@@ -164,24 +173,20 @@ eETg(g,h) $ [(go(g) OR ho(h)) AND (NOT SAMEAS(g,h))]..
     vET(g,h) =E= vES(h,h) - vES(g,h);
 
 eFoc(i) ..
-    r(i) - vc(i) - 2*SUM(j, vq(i,j)*y(j)) - lambda =E= 0;
+    r(i) - vc(i) - SUM(j, vq(i,j)*y(j)) - lambda =E= 0;
 
 eCrit ..
     vCrit =E= SUM(ig $ elasup(ig), SQR(elasup(ig)-vES(ig,ig)))
 
-*            + SUM(g $ elasup(g), SQR(elasup(g)-vES(g,g)))
 
-           + SUM((i,j) $ elatrans(i,j),
-                       SQR[elatrans(i,j) - vET(i,j)])
+           + SUM((ig,jh) $ elatrans(ig,jh),
+                       SQR[elatrans(ig,jh) - vET(ig,jh)])
 
-*           + SUM((g,h) $ (elatrans(g,h) + elatrans(h,g)),
-*                       SQR((elatrans(g,h) + elatrans(h,g))/2
-*                           -vETg(g,h)))
         ;
 
 MODEL mEst Estimation model /eCrit, eFoc, eH, eHi, eUU, eB, edydr, eES, eESg, eET, eETg, eyg, erg/;
-MODEL mSim Simulation model /ep, eland, eyg, erg/;
-*MODEL mSim Simulation model /ep, eland, eyg/;
+*MODEL mSim Simulation model /ep, ectot, eland, eyg, erg/;
+MODEL mSim Simulation model /ep, ectot, eland/;
 
 
 *   --- Initialize levels ---
@@ -203,13 +208,18 @@ q(i,j) = vq.L(i,j);
 c(i) = vc.L(i);
 vy.L(i) = y(i);
 
-PARAMETER pfoc(i);
-pfoc(i) = r(i) - c(i) - 2*SUM(j, q(i,j)*y(j)) - lambda ;
-DISPLAY pfoc;
+PARAMETER pfoc(i),pquad(i),pcmrg(i);
+pfoc(i) = r(i) - c(i) - SUM(j, q(i,j)*y(j)) - lambda ;
+pquad(i) = SUM(j, q(i,j)*y(j));
+pcmrg(i) = c(i) + pquad(i);
+
+DISPLAY pfoc,pquad,pcmrg, lambda;
 
 *   --- Check for calibration ---
+vy.LO(i) = y(i)*0.999;
 SOLVE mSim USING NLP MAXIMIZING vp;
-*$stop
+EXECUTE_UNLOAD "checkdata.gdx";
+$stop
 *   --- Run an experiment ---
 SET restype /
     elasupori
