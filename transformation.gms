@@ -1,8 +1,9 @@
 $TITLE Land Transformation
 $ONTEXT
-    An attempt to calibrate a quadratic model go given supply- and
-    substitution (transformation) elasticities.
+    @purpose: An attempt to calibrate a quadratic model go given supply- and
+              substitution (transformation) elasticities.
 
+    @changes:
     Revision 2: works with just three land uses and no land use groups
 
     Revision 3: attempt to include groups of land uses
@@ -11,7 +12,7 @@ $ONTEXT
 
     Revision 9: tail parameter t(i) functional with hyperbolic term
 
-    Torbjörn Jansson, SLU
+    @author: Torbjörn Jansson, SLU
 $OFFTEXT
 
 SET ig Land uses and groups /forestry, pasture, arable, arable1, arable2, arable3/
@@ -76,9 +77,18 @@ PARAMETERS
     lambda  Land rent
     ;
 
-    s(g,i) $ g_i(g,i) = y(i)/SUM(g_i(g,j), y(j));
+*   --- Compute derived parameters such as aggregates and shares
+    y(g) = SUM(g_i(g,i), y(i));
+    s(g,i) $ g_i(g,i) = y(i)/y(g);
+    r(g) = SUM(i, r(i)*s(g,i));
     land = SUM(i, y(i));
     lambda = SUM(i, y(i)*r(i))/land;
+
+*   --- Define the curvature of the tail parameter a-priori to reduce
+*       the complexity of calibration (less endogenous non-linearity)
+*       Since the MC term is t/y, the formulation below implies an MC term of
+*       "the inverse share of activity relative to calibration, in percent"
+*       One could consider also multiplying with revenue, for scaling.
     t(i) = y(i)/100;
 
 *   --- Models for estimation and simulation ---
@@ -88,12 +98,13 @@ VARIABLES
     vy(ig)  Land allocation
     vr(g)   Group average rent
     vp      Profit
+    vctot   Total behavioural cost (pmp terms)
 
 *       Dual
     vc(i)   Estimated parameter c
     vq(i,j) Estimated parameter q
-    vctot   Total behavioural cost (pmp terms)
-    vH(i,j) Hessian
+    vJ(i)   Jacobian of PMP function
+    vH(i,j) Hessian of PMP function
     vHi(i,j) Hessian inverse
     vU(i,j) Upper triangular Hessian
     vB  Intermediate bracket of implicit function derivative
@@ -106,6 +117,8 @@ VARIABLES
     ;
 
 POSITIVE VARIABLE vy;
+* Constrain U to be upper triangular
+vU.FX(i,j) $ [NOT u(i,j)] = 0;
 
 EQUATIONS
 *       Primal
@@ -116,6 +129,7 @@ EQUATIONS
     erg(g)
 
 *       Dual
+    eJ(i)   Jacobian
     eH(i,j) Hessian
     eHi(i,j) Hessian inverse
     eUU(i,j) Cholesky factorization
@@ -129,7 +143,9 @@ EQUATIONS
     eCrit   Econometric criterion
     ;
 
+
 *   --- Definition of equations ---
+*     - Primal model
 ep ..
     vp =E= SUM(i, vy(i)*r(i)) - vctot;
 
@@ -140,12 +156,19 @@ ectot ..
 eland ..
     SUM(i, vy(i)) =L= land;
 
+
+*     - Dual equations for estimator
 eyg(g) ..
     vy(g) =E= SUM(g_i(g,i), vy(i));
 
 erg(g) ..
     vr(g)*vy(g) =E= SUM(g_i(g,i), r(i)*vy(i));
 
+eJ(i) ..
+    vJ(i) =E= vc(i) + SUM(j, vq(i,j)*y(j)) + t(i)/vy(i);
+
+eFoc(i) ..
+    r(i) - vJ(i) - lambda =E= 0;
 
 eH(i,j) ..
      vH(i,j)$u(i,j) + vH(j,i)$[NOT u(i,j)] =E= vq(i,j) - [t(i)/SQR(vy(i))]$SAMEAS(i,j);
@@ -175,45 +198,37 @@ eET(i,j) $ [NOT SAMEAS(i,j)]..
 eETg(g,h) $ [(go(g) OR ho(h)) AND (NOT SAMEAS(g,h))]..
     vET(g,h) =E= vES(h,h) - vES(g,h);
 
-eFoc(i) ..
-    r(i) - vc(i) - SUM(j, vq(i,j)*y(j)) - t(i)/vy(i) - lambda =E= 0;
-
 eCrit ..
     vCrit =E= SUM(ig $ elasup(ig), SQR(elasup(ig)-vES(ig,ig)))
 
-           + SUM((ig,jh) $ elatrans(ig,jh),
+            + SUM((ig,jh) $ elatrans(ig,jh),
                        SQR[elatrans(ig,jh) - vET(ig,jh)])
         ;
 
-MODEL mEst Estimation model /eCrit, eFoc, eH, eHi, eUU, eB, edydr, eES, eESg, eET, eETg, eyg, erg/;
-*MODEL mSim Simulation model /ep, ectot, eland, eyg, erg/;
+MODEL mEst Estimation model /eCrit, eJ, eFoc, eH, eHi, eUU, eB, edydr, eES, eESg, eET, eETg, eyg, erg/;
 MODEL mSim Simulation model /ep, ectot, eland/;
 
 
 *   --- Initialize levels ---
 vH.L(i,i) = 100;
-vHi.L(i,i) = 1/vH.L(i,i);
+vHi.L(i,i)= 1/vH.L(i,i);
 vU.L(i,i) = SQRT(vH.L(i,i));
-vU.FX(i,j) $ [NOT u(i,j)] = 0;
-vy.L(i) = y(i);
+vy.L(ig)  = y(ig);
+vr.L(g)   = r(g);
 
-y(g)             = SUM(g_i(g,i), y(i));
-vy.L(g)          = y(g);
-vr.L(g) $ vy.L(g)= SUM(g_i(g,i), r(i)*vy.L(i)) / vy.L(g);
-r(g) = vr.L(g);
 
+*   --- Estimate!
 SOLVE mEst USING NLP MINIMIZING vCrit;
 
 
+*   --- Store estimated parameters
 q(i,j) = vq.L(i,j);
 c(i) = vc.L(i);
-vy.L(i) = y(i);
+
 
 *   --- Check for calibration ---
-
-PARAMETER ssq;
-*vy.LO(i) = y(i)*0.999;
 SOLVE mSim USING NLP MAXIMIZING vp;
+PARAMETER ssq "Sum of squared deviations, normalized with total land";
 ssq = SUM(i, SQR(y(i)-vy.L(i))) / land;
 IF(ABS(ssq) GT 0.001,
     EXECUTE_UNLOAD "checkdata.gdx";
@@ -221,17 +236,23 @@ IF(ABS(ssq) GT 0.001,
 );
 
 
-*   --- Run an experiment ---
-SET restype /
-    elasupori
-    elasupsim
-    rentori
-    rentsim
-    landori
-    landsim/;
+*   --- Run simulation experiments to compare numerical and analytical
+*       results for elasticities
+SET restype Results that we would like to store and compare/
+    elasupori   Original exogenous matrix of supply elasticities
+    elasupest   Analytical matrix of supply elasticities in estimation
+    elasupsim   Numerically simulated supply elasticities
+
+    elatransori Original exogenous matrix of transformation elasticities
+    elatransest Analytical matrix of transformation elasticities in estimation
+    elatranssim Numerically simulated transformation elasticities
+
+    rentori     Original observed rent in land use
+    landori     Original land allocation
+    /;
 
 PARAMETERS
-    res(*,ig,ig) Result set
+    res(restype,ig,ig) Result set
     d Relative shock to price/0.001/;
 
 res("rentori",ig,ig) = r(ig);
@@ -243,11 +264,9 @@ res("elasupest",ig,jh) = vES.L(ig,jh);
 res("elatransest",ig,jh) = vET.L(ig,jh);
 LOOP(k,
     r(k)  = r(k)*(1+d);
-    res("rentsim",k,k) = r(k);
     SOLVE mSim USING NLP MAXIMIZING vp;
     r(k) = r(k)/(1+d);
 
-    res("landsim",k,k) = vy.L(k);
     res("elasupsim",ig,k) = (vy.L(ig)-y(ig))/y(ig)/d;
 
 
@@ -257,5 +276,5 @@ LOOP(k,
 );
 
 
-
-EXECUTE_UNLOAD "transformation.gdx" res i g go vq vHi vq vH vU u vET vES vESg s;
+*   --- Store results of simulation experiments
+EXECUTE_UNLOAD "transformation.gdx" res restype i g go vq vHi vq vH vU u vET vES vESg s;
