@@ -9,6 +9,8 @@ $ONTEXT
 
     Revision 4: added a parameter that makes costs increase steeply in lower tail
 
+    Revision 9: tail parameter t(i) functional with hyperbolic term
+
     Torbjörn Jansson, SLU
 $OFFTEXT
 
@@ -77,6 +79,7 @@ PARAMETERS
     s(g,i) $ g_i(g,i) = y(i)/SUM(g_i(g,j), y(j));
     land = SUM(i, y(i));
     lambda = SUM(i, y(i)*r(i))/land;
+    t(i) = y(i)/100;
 
 *   --- Models for estimation and simulation ---
 
@@ -129,11 +132,11 @@ EQUATIONS
 *   --- Definition of equations ---
 ep ..
     vp =E= SUM(i, vy(i)*r(i)) - vctot;
-*    vp =E= SUM(i, vy(i)*r(i)-c(i)) - 0.5*SUM((i,j), vy(i)*q(i,j)*vy(j));
 
 ectot ..
-    vctot =E= SUM(i, y(i)*c(i)) + 0.5*SUM((i,j), vy(i)*q(i,j)*vy(j));
-
+    vctot =E= SUM(i, vy(i)*c(i))
+        + 0.5*SUM((i,j), vy(i)*q(i,j)*vy(j))
+            + SUM(i, t(i)*LOG(vy(i)));
 eland ..
     SUM(i, vy(i)) =L= land;
 
@@ -145,13 +148,13 @@ erg(g) ..
 
 
 eH(i,j) ..
-    vq(i,j) =E= vH(i,j)$u(i,j) + vH(j,i)$[NOT u(i,j)];
+     vH(i,j)$u(i,j) + vH(j,i)$[NOT u(i,j)] =E= vq(i,j) - [t(i)/SQR(vy(i))]$SAMEAS(i,j);
 
 eHi(i,j) ..
     SUM(k, vHi(i,k)*[vH(k,j)$u(k,j) + vH(j,k)$(NOT u(k,j))]) =E= 1 $ SAMEAS(i,j);
 
 eUU(i,j) $ u(i,j)..
-    vH(i,j)*(1-0.01 $ SAMEAS(i,j))
+    vH(i,j)*(1-0.001 $ SAMEAS(i,j))
         =E= SUM(k, vU(k,i)*vU(k,j));
 
 eB ..
@@ -173,15 +176,13 @@ eETg(g,h) $ [(go(g) OR ho(h)) AND (NOT SAMEAS(g,h))]..
     vET(g,h) =E= vES(h,h) - vES(g,h);
 
 eFoc(i) ..
-    r(i) - vc(i) - SUM(j, vq(i,j)*y(j)) - lambda =E= 0;
+    r(i) - vc(i) - SUM(j, vq(i,j)*y(j)) - t(i)/vy(i) - lambda =E= 0;
 
 eCrit ..
     vCrit =E= SUM(ig $ elasup(ig), SQR(elasup(ig)-vES(ig,ig)))
 
-
            + SUM((ig,jh) $ elatrans(ig,jh),
                        SQR[elatrans(ig,jh) - vET(ig,jh)])
-
         ;
 
 MODEL mEst Estimation model /eCrit, eFoc, eH, eHi, eUU, eB, edydr, eES, eESg, eET, eETg, eyg, erg/;
@@ -208,18 +209,18 @@ q(i,j) = vq.L(i,j);
 c(i) = vc.L(i);
 vy.L(i) = y(i);
 
-PARAMETER pfoc(i),pquad(i),pcmrg(i);
-pfoc(i) = r(i) - c(i) - SUM(j, q(i,j)*y(j)) - lambda ;
-pquad(i) = SUM(j, q(i,j)*y(j));
-pcmrg(i) = c(i) + pquad(i);
-
-DISPLAY pfoc,pquad,pcmrg, lambda;
-
 *   --- Check for calibration ---
-vy.LO(i) = y(i)*0.999;
+
+PARAMETER ssq;
+*vy.LO(i) = y(i)*0.999;
 SOLVE mSim USING NLP MAXIMIZING vp;
-EXECUTE_UNLOAD "checkdata.gdx";
-$stop
+ssq = SUM(i, SQR(y(i)-vy.L(i))) / land;
+IF(ABS(ssq) GT 0.001,
+    EXECUTE_UNLOAD "checkdata.gdx";
+    ABORT "Calibration failed";
+);
+
+
 *   --- Run an experiment ---
 SET restype /
     elasupori
